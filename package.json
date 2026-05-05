@@ -1,0 +1,26 @@
+{
+  "name": "pi-safety-net",
+  "version": "0.1.0",
+  "description": "Pi extension that intercepts dangerous shell commands and requires user confirmation before execution",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "safety",
+    "extension",
+    "security"
+  ],
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "dependencies": {
+    "shell-quote": "^1.8.3"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
