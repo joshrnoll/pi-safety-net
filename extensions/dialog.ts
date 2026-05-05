@@ -46,11 +46,12 @@ export async function handleToolCallWithDialog(
   const command = (event.input as { command: string }).command;
   const options = buildAnalysisOptions(ctx.cwd);
 
-  // Check session allowlist before analysis (session-level bypass)
-  // Session map is keyed on the raw command for simplicity at this layer;
-  // ISSUE_00005 will refine keying using the blocked segment.
   const result = analyzeCommand(command, options);
   if (result === null) return undefined;
+
+  // Session-level bypass: if this pattern was already allowed this session, skip dialog.
+  const key = sessionKey(command, result.segment);
+  if (sessionMap.has(key)) return undefined;
 
   // Fall back to hard block in non-interactive mode
   if (!ctx.hasUI) {
