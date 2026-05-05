@@ -226,6 +226,8 @@ test('dialog handler writes audit log entry when command is blocked (Deny)', asy
       bashEvent('git push --force'),
       ctx,
       sessionMap,
+      [],
+      undefined,
       undefined,
       'test-session-deny',
     );
@@ -257,6 +259,8 @@ test('dialog handler writes audit log entry when command is allowed once', async
       bashEvent('git push --force'),
       ctx,
       new Map(),
+      [],
+      undefined,
       undefined,
       'test-session-allow-once',
     );
@@ -280,7 +284,7 @@ test('dialog handler does NOT write audit log for safe (non-blocked) commands', 
   process.env['PI_SAFETY_NET_LOG_HOME'] = homeDir;
   try {
     const ctx = makeCtx({});
-    await handleToolCallWithDialog(bashEvent('git status'), ctx, new Map(), undefined, 'safe-session');
+    await handleToolCallWithDialog(bashEvent('git status'), ctx, new Map(), [], undefined, undefined, 'safe-session');
 
     const logDir = join(homeDir, '.pi-safety-net', 'logs');
     const logFile = join(logDir, 'safe-session.jsonl');
@@ -320,6 +324,8 @@ test('dialog body redacts secrets in the command shown', async () => {
       bashEvent('MY_TOKEN=abc123 git push --force'),
       ctx,
       new Map(),
+      [],
+      undefined,
       undefined,
       'redact-dialog-session',
     );

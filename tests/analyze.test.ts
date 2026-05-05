@@ -14,6 +14,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { analyzeCommand } from '../extensions/src/core/analyze.js';
 
 const cwd = process.cwd();
@@ -33,8 +35,33 @@ test('git reset --hard is allowed inside a worktree (worktreeMode default=true)'
   // With worktree mode on (default), git discard commands are allowed inside linked worktrees.
   // PRD §5: "git reset --hard, git restore, git checkout --, and git clean -f to be allowed
   // by default inside linked worktrees".
-  // The test runs from a real worktree so this should return null.
-  const result = analyzeCommand('git reset --hard', { cwd });
+  //
+  // We must pass a path that git detects as a linked worktree (not the main repo dir).
+  // Check for any available linked worktree; skip if none exist.
+  let worktreeCwd: string | null = null;
+  try {
+    const lines = execSync('git worktree list --porcelain', { cwd }).toString().split('\n');
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        const p = line.slice('worktree '.length).trim();
+        // Skip the main worktree (it reports common == dir, not a linked worktree)
+        const common = execSync('git rev-parse --git-common-dir', { cwd: p }).toString().trim();
+        const gitDir = execSync('git rev-parse --git-dir', { cwd: p }).toString().trim();
+        if (common !== gitDir && existsSync(p)) {
+          worktreeCwd = p;
+          break;
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  if (worktreeCwd === null) {
+    // No linked worktrees available — skip
+    console.log('SKIP: no linked worktree available for worktree-mode test');
+    return;
+  }
+
+  const result = analyzeCommand('git reset --hard', { cwd: worktreeCwd });
   assert.equal(
     result,
     null,
