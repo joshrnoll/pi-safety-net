@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { handleToolCall } from "./hook.js";
+import { handleToolCallWithDialog } from "./dialog.js";
+import { buildStatusText } from "./status.js";
 
 /**
  * pi-safety-net extension
@@ -11,5 +12,18 @@ import { handleToolCall } from "./hook.js";
  * https://github.com/kenryu42/claude-code-safety-net
  */
 export default function (pi: ExtensionAPI) {
-  pi.on("tool_call", (event, ctx) => handleToolCall(event, ctx.cwd));
+  // Session-level allowlist: cleared when the extension runtime is torn down.
+  const sessionMap = new Map<string, true>();
+
+  pi.on("session_start", (_event, ctx) => {
+    ctx.ui.setStatus("pi-safety-net", buildStatusText());
+  });
+
+  pi.on("session_shutdown", () => {
+    sessionMap.clear();
+  });
+
+  pi.on("tool_call", (event, ctx) =>
+    handleToolCallWithDialog(event, ctx, sessionMap)
+  );
 }
