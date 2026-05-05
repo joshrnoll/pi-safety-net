@@ -39,8 +39,11 @@ export function sanitizeSessionIdForFilename(sessionId: string): string | null {
 }
 
 /**
- * Write an audit log entry for a denied command.
- * Logs are written to ~/.cc-safety-net/logs/<session_id>.jsonl
+ * Write an audit log entry for a detected (potentially dangerous) command.
+ * Logs are written to ~/.pi-safety-net/logs/<session_id>.jsonl
+ *
+ * The log home directory can be overridden via the PI_SAFETY_NET_LOG_HOME
+ * environment variable (used in tests to avoid writing to the real home dir).
  */
 export function writeAuditLog(
   sessionId: string,
@@ -55,8 +58,8 @@ export function writeAuditLog(
     return;
   }
 
-  const home = options.homeDir ?? homedir();
-  const logsDir = join(home, '.cc-safety-net', 'logs');
+  const home = options.homeDir ?? process.env['PI_SAFETY_NET_LOG_HOME'] ?? homedir();
+  const logsDir = join(home, '.pi-safety-net', 'logs');
 
   try {
     if (!existsSync(logsDir)) {

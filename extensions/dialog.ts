@@ -9,7 +9,9 @@
  */
 
 import { analyzeCommand } from './src/core/analyze.js';
+import { writeAuditLog, redactSecrets } from './src/core/audit.js';
 import { buildAnalysisOptions } from './hook.js';
+import type { Config } from './src/types.js';
 import type { ToolCallEvent, ToolCallEventResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 
 // ---------------------------------------------------------------------------
@@ -40,14 +42,29 @@ export async function handleToolCallWithDialog(
   event: ToolCallEvent,
   ctx: Pick<ExtensionContext, 'hasUI' | 'cwd' | 'ui'>,
   sessionMap: Map<string, true>,
+  cachedConfig?: Config,
+  sessionId?: string,
 ): Promise<ToolCallEventResult | undefined> {
   if (event.toolName !== 'bash') return undefined;
 
   const command = (event.input as { command: string }).command;
   const options = buildAnalysisOptions(ctx.cwd);
 
-  const result = analyzeCommand(command, options);
+  // Use cached config from session_start if available; otherwise analyzeCommand
+  // will call loadConfig itself.
+  const result = analyzeCommand(command, { ...options, config: cachedConfig });
   if (result === null) return undefined;
+
+  // Write audit log entry immediately when a dangerous command is detected,
+  // before showing the dialog (regardless of whether the user allows it).
+  const effectiveSessionId = sessionId ?? `fallback-${Date.now()}`;
+  writeAuditLog(
+    effectiveSessionId,
+    command,
+    result.segment,
+    result.reason,
+    ctx.cwd ?? null,
+  );
 
   // Session-level bypass: if this pattern was already allowed this session, skip dialog.
   const key = sessionKey(command, result.segment);
@@ -58,12 +75,16 @@ export async function handleToolCallWithDialog(
     return { block: true, reason: result.reason };
   }
 
-  // Build dialog body
+  // Redact secrets from the command before displaying in the dialog.
+  const safeCommand = redactSecrets(command);
+  const safeSegment = redactSecrets(result.segment);
+
+  // Build dialog body with redacted command
   const body = [
     `Reason: ${result.reason}`,
-    `Command: ${command}`,
-    ...(result.segment && result.segment !== command
-      ? [`Segment: ${result.segment}`]
+    `Command: ${safeCommand}`,
+    ...(safeSegment && safeSegment !== safeCommand
+      ? [`Segment: ${safeSegment}`]
       : []),
   ].join('\n');
 

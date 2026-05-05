@@ -29,11 +29,24 @@ export interface LoadConfigOptions {
   userConfigDir?: string;
 }
 
+/**
+ * Resolve the project config path, preferring `.pi-safety-net.json` and
+ * falling back to the legacy `.safety-net.json` for backward compatibility.
+ */
+export function resolveProjectConfigPath(cwd: string): string {
+  const piPath = join(cwd, '.pi-safety-net.json');
+  if (existsSync(piPath)) {
+    return piPath;
+  }
+  return join(cwd, '.safety-net.json');
+}
+
 export function loadConfig(cwd?: string, options?: LoadConfigOptions): Config {
   const safeCwd = typeof cwd === 'string' ? cwd : process.cwd();
-  const userConfigDir = options?.userConfigDir ?? join(homedir(), '.cc-safety-net');
+  // User config lives in ~/.pi-safety-net/ (was ~/.cc-safety-net/ in the original vendored code)
+  const userConfigDir = options?.userConfigDir ?? join(homedir(), '.pi-safety-net');
   const userConfigPath = join(userConfigDir, 'config.json');
-  const projectConfigPath = join(safeCwd, '.safety-net.json');
+  const projectConfigPath = resolveProjectConfigPath(safeCwd);
 
   const userConfig = loadSingleConfig(userConfigPath);
   const projectConfig = loadSingleConfig(projectConfigPath);
@@ -222,11 +235,11 @@ export function validateConfigFile(path: string): ValidationResult {
 }
 
 export function getUserConfigPath(): string {
-  return join(homedir(), '.cc-safety-net', 'config.json');
+  return join(homedir(), '.pi-safety-net', 'config.json');
 }
 
 export function getProjectConfigPath(cwd?: string): string {
-  return resolve(cwd ?? process.cwd(), '.safety-net.json');
+  return resolveProjectConfigPath(resolve(cwd ?? process.cwd()));
 }
 
 export type { ValidationResult };
