@@ -6,6 +6,7 @@ import type { Config } from "./src/types.js";
 import { loadAllowlist } from "./src/allowlist.js";
 import type { AllowEntry } from "./src/allowlist.js";
 import { handleAllowList, handleAllowRemove } from "./src/allow-commands.js";
+import { handleExplainCommand } from "./src/explain-command.js";
 
 /**
  * pi-safety-net extension
@@ -51,6 +52,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", (event, ctx) =>
     handleToolCallWithDialog(event, ctx, sessionMap, allowlistCache, undefined, sessionConfig, sessionId)
   );
+
+  // /safety-net:explain <command>
+  pi.registerCommand("safety-net:explain", {
+    description: "Trace how a command would be analysed by the safety net",
+    handler: async (args, ctx) => {
+      await handleExplainCommand(args, ctx);
+    },
+  });
 
   // /safety-net:allow list | remove
   pi.registerCommand("safety-net:allow", {
