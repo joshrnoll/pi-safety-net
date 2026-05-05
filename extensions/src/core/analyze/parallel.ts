@@ -1,0 +1,454 @@
+/**
+ * Vendored from cc-safety-net (MIT License)
+ * Original author: kenryu42 (J Liew)
+ * Source: https://github.com/kenryu42/claude-code-safety-net
+ *
+ * Modifications for pi-safety-net:
+ *   - Replaced @/ path aliases with relative imports
+ *   - Worktree mode enabled by default (see analyze.ts)
+ */
+
+import { analyzeFind } from './find';
+import { hasRecursiveForceFlags } from './rm-flags';
+import { extractDashCArg } from './shell-wrappers';
+import { analyzeGit } from '../rules-git';
+import { analyzeRm } from '../rules-rm';
+import { getBasename, stripWrappersWithInfo } from '../shell';
+import { type AnalyzeNestedOverrides, SHELL_WRAPPERS } from '../../types';
+
+const REASON_PARALLEL_RM =
+  'parallel rm -rf with dynamic input is dangerous. Use explicit file list instead.';
+const REASON_PARALLEL_SHELL =
+  'parallel with shell -c can execute arbitrary commands from dynamic input.';
+const PARALLEL_PLACEHOLDER_RE = /\{[^{}\s]*\}/;
+
+export interface ParallelAnalyzeContext {
+  cwd: string | undefined;
+  originalCwd: string | undefined;
+  paranoidRm: boolean | undefined;
+  allowTmpdirVar: boolean;
+  envAssignments?: ReadonlyMap<string, string>;
+  worktreeMode?: boolean;
+  analyzeNested: (command: string, overrides?: AnalyzeNestedOverrides) => string | null;
+}
+
+export function analyzeParallel(
+  tokens: readonly string[],
+  context: ParallelAnalyzeContext,
+): string | null {
+  const parseResult = parseParallelCommand(tokens);
+
+  if (!parseResult) {
+    return null;
+  }
+
+  const { template, args, hasPlaceholder, runsRemotely, usesStdin } = parseResult;
+  const hasDynamicStdinPlaceholder = usesStdin && hasPlaceholder;
+
+  if (template.length === 0) {
+    // parallel ::: 'cmd1' 'cmd2' - commands mode
+    // Analyze each arg as a command
+    const nestedOverrides = buildCommandsModeOverrides(context, runsRemotely);
+    for (const arg of args) {
+      const reason = context.analyzeNested(arg, nestedOverrides);
+      if (reason) {
+        return reason;
+      }
+    }
+    return null;
+  }
+
+  const childWrapperInfo = stripWrappersWithInfo([...template], context.cwd);
+  let childTokens = childWrapperInfo.tokens;
+  const childEnvAssignments = new Map(context.envAssignments ?? []);
+  for (const [k, v] of childWrapperInfo.envAssignments) {
+    childEnvAssignments.set(k, v);
+  }
+  const childCwd =
+    childWrapperInfo.cwd === null ? undefined : (childWrapperInfo.cwd ?? context.cwd);
+  const nestedOverrides = buildNestedOverrides(
+    childEnvAssignments,
+    childWrapperInfo.cwd,
+    runsRemotely || hasDynamicStdinPlaceholder,
+  );
+  let head = getBasename(childTokens[0] ?? '').toLowerCase();
+
+  if (head === 'busybox' && childTokens.length > 1) {
+    childTokens = childTokens.slice(1);
+    head = getBasename(childTokens[0] ?? '').toLowerCase();
+  }
+
+  // Check for shell wrapper with -c
+  if (SHELL_WRAPPERS.has(head)) {
+    const dashCArg = extractDashCArg(childTokens);
+    if (dashCArg) {
+      // If script IS just the placeholder, stdin provides entire script - dangerous
+      if (isOnlyParallelPlaceholder(dashCArg)) {
+        return REASON_PARALLEL_SHELL;
+      }
+      // If script contains placeholder
+      if (hasParallelPlaceholder(dashCArg)) {
+        if (args.length > 0) {
+          // Expand with actual args and analyze
+          for (const arg of args) {
+            const expandedScript = replaceParallelPlaceholder(dashCArg, arg);
+            const reason = context.analyzeNested(expandedScript, nestedOverrides);
+            if (reason) {
+              return reason;
+            }
+          }
+          return null;
+        }
+        // Stdin mode with placeholder - analyze the script template
+        // Check if the script pattern is dangerous (e.g., rm -rf {})
+        const reason = context.analyzeNested(dashCArg, nestedOverrides);
+        if (reason) {
+          return reason;
+        }
+        return null;
+      }
+      // Script doesn't have placeholder - analyze it directly
+      const reason = context.analyzeNested(dashCArg, nestedOverrides);
+      if (reason) {
+        return reason;
+      }
+      // If there's a placeholder in the shell wrapper args (not script),
+      // it's still dangerous
+      if (hasPlaceholder) {
+        return REASON_PARALLEL_SHELL;
+      }
+      return null;
+    }
+    // bash -c without script argument
+    // If there are args from :::, those become the scripts - dangerous pattern
+    if (args.length > 0) {
+      // The pattern of passing scripts via ::: to bash -c is inherently dangerous
+      return REASON_PARALLEL_SHELL;
+    }
+    // Stdin provides the script - dangerous
+    if (hasPlaceholder) {
+      return REASON_PARALLEL_SHELL;
+    }
+    return null;
+  }
+
+  // For rm -rf, expand with actual args and analyze each expansion
+  if (head === 'rm' && hasRecursiveForceFlags(childTokens)) {
+    if (hasPlaceholder && args.length > 0) {
+      // Expand template with each arg and analyze
+      for (const arg of args) {
+        const expandedTokens = childTokens.map((t) => t.replace(/{}/g, arg));
+        const rmResult = analyzeRm(expandedTokens, {
+          cwd: childCwd,
+          originalCwd: context.originalCwd,
+          paranoid: context.paranoidRm,
+          allowTmpdirVar: context.allowTmpdirVar,
+        });
+        if (rmResult) {
+          return rmResult;
+        }
+      }
+      return null;
+    }
+    // No placeholder or no args - analyze template as-is
+    // If there are args (from :::), they get appended, analyze with first arg
+    if (args.length > 0) {
+      const expandedTokens = [...childTokens, args[0] ?? ''];
+      const rmResult = analyzeRm(expandedTokens, {
+        cwd: childCwd,
+        originalCwd: context.originalCwd,
+        paranoid: context.paranoidRm,
+        allowTmpdirVar: context.allowTmpdirVar,
+      });
+      if (rmResult) {
+        return rmResult;
+      }
+      return null;
+    }
+    return REASON_PARALLEL_RM;
+  }
+
+  if (head === 'find') {
+    const findResult = analyzeFind(childTokens);
+    if (findResult) {
+      return findResult;
+    }
+  }
+
+  if (head === 'git') {
+    const gitTokenSets =
+      hasPlaceholder && args.length > 0
+        ? args.map((arg) => childTokens.map((token) => replaceParallelPlaceholder(token, arg)))
+        : !hasPlaceholder && args.length > 0
+          ? args.map((arg) => [...childTokens, arg])
+          : [childTokens];
+    const dynamicGitArgs = usesStdin || hasPlaceholder;
+    for (const gitTokens of gitTokenSets) {
+      const gitResult = analyzeGit(gitTokens, {
+        cwd: childCwd,
+        envAssignments: childEnvAssignments,
+        worktreeMode: runsRemotely || dynamicGitArgs ? false : context.worktreeMode,
+      });
+      if (gitResult) {
+        return gitResult;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildNestedOverrides(
+  envAssignments: ReadonlyMap<string, string>,
+  cwd: string | null | undefined,
+  runsRemotely: boolean,
+): AnalyzeNestedOverrides {
+  const overrides: AnalyzeNestedOverrides = { envAssignments };
+  if (cwd !== undefined) {
+    overrides.effectiveCwd = cwd;
+  }
+  if (runsRemotely) {
+    overrides.worktreeMode = false;
+  }
+  return overrides;
+}
+
+function buildCommandsModeOverrides(
+  context: ParallelAnalyzeContext,
+  runsRemotely: boolean,
+): AnalyzeNestedOverrides | undefined {
+  const overrides: AnalyzeNestedOverrides = {};
+  if (context.envAssignments) {
+    overrides.envAssignments = context.envAssignments;
+  }
+  if (context.cwd !== undefined) {
+    overrides.effectiveCwd = context.cwd;
+  }
+  if (runsRemotely) {
+    overrides.worktreeMode = false;
+  }
+  return Object.keys(overrides).length > 0 ? overrides : undefined;
+}
+
+interface ParallelParseResult {
+  template: string[];
+  args: string[];
+  hasPlaceholder: boolean;
+  runsRemotely: boolean;
+  usesStdin: boolean;
+}
+
+function replaceParallelPlaceholder(token: string, arg: string): string {
+  return token.replace(/\{[^{}\s]*\}/g, arg);
+}
+
+function hasParallelPlaceholder(token: string): boolean {
+  return PARALLEL_PLACEHOLDER_RE.test(token);
+}
+
+function isOnlyParallelPlaceholder(token: string): boolean {
+  return /^\{[^{}\s]*\}$/.test(token);
+}
+
+function parseParallelCommand(tokens: readonly string[]): ParallelParseResult | null {
+  // Options that take a value as the next token
+  const parallelOptsWithValue = new Set([
+    '-S',
+    '--sshlogin',
+    '--slf',
+    '--sshloginfile',
+    '-a',
+    '--arg-file',
+    '--colsep',
+    '-I',
+    '--replace',
+    '--results',
+    '--result',
+    '--res',
+  ]);
+
+  let i = 1;
+  const templateTokens: string[] = [];
+  let markerIndex = -1;
+  let runsRemotely = false;
+
+  // First pass: find the ::: marker and extract template
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (!token) break;
+
+    if (token === ':::') {
+      markerIndex = i;
+      break;
+    }
+
+    if (token === '--') {
+      // Everything after -- until ::: is the template
+      i++;
+      while (i < tokens.length) {
+        const token = tokens[i];
+        if (token === undefined || token === ':::') break;
+        templateTokens.push(token);
+        i++;
+      }
+      if (i < tokens.length && tokens[i] === ':::') {
+        markerIndex = i;
+      }
+      break;
+    }
+
+    if (token.startsWith('-')) {
+      if (
+        token === '-S' ||
+        token === '--sshlogin' ||
+        token === '--slf' ||
+        token === '--sshloginfile'
+      ) {
+        runsRemotely = true;
+        i += 2;
+        continue;
+      }
+
+      if (token.startsWith('-S') && token.length > 2) {
+        runsRemotely = true;
+        i++;
+        continue;
+      }
+
+      if (
+        token.startsWith('--sshlogin=') ||
+        token.startsWith('--slf=') ||
+        token.startsWith('--sshloginfile=')
+      ) {
+        runsRemotely = true;
+        i++;
+        continue;
+      }
+
+      // Handle -jN attached option
+      if (token.startsWith('-j') && token.length > 2 && /^\d+$/.test(token.slice(2))) {
+        i++;
+        continue;
+      }
+
+      // Handle --option=value
+      if (token.startsWith('--') && token.includes('=')) {
+        i++;
+        continue;
+      }
+
+      // Handle options that take a value
+      if (parallelOptsWithValue.has(token)) {
+        i += 2;
+        continue;
+      }
+
+      // Handle -j as separate option
+      if (token === '-j' || token === '--jobs') {
+        i += 2;
+        continue;
+      }
+
+      // Unknown option - skip it
+      i++;
+    } else {
+      // Start of template
+      while (i < tokens.length) {
+        const token = tokens[i];
+        if (token === undefined || token === ':::') break;
+        templateTokens.push(token);
+        i++;
+      }
+      if (i < tokens.length && tokens[i] === ':::') {
+        markerIndex = i;
+      }
+      break;
+    }
+  }
+
+  // Extract args after :::
+  const args: string[] = [];
+  if (markerIndex !== -1) {
+    for (let j = markerIndex + 1; j < tokens.length; j++) {
+      const token = tokens[j];
+      if (token && token !== ':::') {
+        args.push(token);
+      }
+    }
+  }
+
+  // Determine if template has placeholder
+  const hasPlaceholder = templateTokens.some(hasParallelPlaceholder);
+
+  // If no template and no marker, no valid parallel command
+  if (templateTokens.length === 0 && markerIndex === -1) {
+    return null;
+  }
+
+  return {
+    template: templateTokens,
+    args,
+    hasPlaceholder,
+    runsRemotely,
+    usesStdin: markerIndex === -1,
+  };
+}
+
+export function extractParallelChildCommand(tokens: readonly string[]): string[] {
+  // Legacy behavior: return everything after options until end
+  // This includes ::: marker and args if present
+  const parallelOptsWithValue = new Set([
+    '-S',
+    '--sshlogin',
+    '--slf',
+    '--sshloginfile',
+    '-a',
+    '--arg-file',
+    '--colsep',
+    '-I',
+    '--replace',
+    '--results',
+    '--result',
+    '--res',
+  ]);
+
+  let i = 1;
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (!token) break;
+
+    if (token === ':::') {
+      // ::: as first non-option means no template
+      return [];
+    }
+
+    if (token === '--') {
+      return [...tokens.slice(i + 1)];
+    }
+
+    if (token.startsWith('-')) {
+      if (token.startsWith('-j') && token.length > 2 && /^\d+$/.test(token.slice(2))) {
+        i++;
+        continue;
+      }
+      if (token.startsWith('--') && token.includes('=')) {
+        i++;
+        continue;
+      }
+      if (parallelOptsWithValue.has(token)) {
+        i += 2;
+        continue;
+      }
+      if (token === '-j' || token === '--jobs') {
+        i += 2;
+        continue;
+      }
+      i++;
+    } else {
+      // Return everything from here to end (including ::: and args)
+      return [...tokens.slice(i)];
+    }
+  }
+
+  return [];
+}

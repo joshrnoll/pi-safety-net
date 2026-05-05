@@ -10,8 +10,14 @@
     "extension",
     "security"
   ],
+  "scripts": {
+    "test": "node --test --import tsx tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   },
   "dependencies": {
     "shell-quote": "^1.8.3"
@@ -22,5 +28,10 @@
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/shell-quote": "^1.7.5",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
 }

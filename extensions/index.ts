@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
  * Vendored analysis engine derived from cc-safety-net (MIT, kenryu42):
  * https://github.com/kenryu42/claude-code-safety-net
  */
-export default function (pi: ExtensionAPI) {
+export default function (_pi: ExtensionAPI) {
   // Stub: extension registers no events yet.
   // Analysis engine wiring is implemented in subsequent waves.
 }
