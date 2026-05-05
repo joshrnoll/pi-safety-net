@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { handleToolCall } from "./hook.js";
 
 /**
  * pi-safety-net extension
@@ -9,7 +10,6 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
  * Vendored analysis engine derived from cc-safety-net (MIT, kenryu42):
  * https://github.com/kenryu42/claude-code-safety-net
  */
-export default function (_pi: ExtensionAPI) {
-  // Stub: extension registers no events yet.
-  // Analysis engine wiring is implemented in subsequent waves.
+export default function (pi: ExtensionAPI) {
+  pi.on("tool_call", (event, ctx) => handleToolCall(event, ctx.cwd));
 }
