@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { analyzeCommand } from '../extensions/src/core/analyze.js';
@@ -39,8 +40,25 @@ function cleanup(dir: string): void {
 // We create a fresh temp dir; git won't recognise it as a worktree.
 const tmpCwd = makeTmpCwd('main');
 
-// The test process cwd is inside a git worktree (the wave worktree itself).
-const worktreeCwd = process.cwd();
+// Discover a linked worktree to use for worktree-mode tests.
+// Returns null if no linked worktrees are available (tests that use this will skip).
+function findLinkedWorktree(): string | null {
+  try {
+    const lines = execSync('git worktree list --porcelain', { cwd: process.cwd() }).toString().split('\n');
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        const p = line.slice('worktree '.length).trim();
+        const common = execSync('git rev-parse --git-common-dir', { cwd: p }).toString().trim();
+        const gitDir = execSync('git rev-parse --git-dir', { cwd: p }).toString().trim();
+        // A linked worktree has a different --git-dir from --git-common-dir
+        if (common !== gitDir && existsSync(p)) return p;
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+const worktreeCwd = findLinkedWorktree();
 
 // ---------------------------------------------------------------------------
 // Worktree mode: default ON
@@ -63,7 +81,10 @@ test('git local discard: git reset --hard is BLOCKED when worktreeMode=false', (
 });
 
 test('git local discard: git reset --hard is ALLOWED inside a linked worktree (default mode)', () => {
-  // The test process cwd IS a linked worktree — worktree mode allows local discard there.
+  if (!worktreeCwd) {
+    console.log('SKIP: no linked worktree available');
+    return;
+  }
   const result = analyzeCommand('git reset --hard', { cwd: worktreeCwd });
   assert.equal(result, null,
     'git reset --hard should be allowed in a linked worktree with default worktreeMode=true');
@@ -75,6 +96,7 @@ test('git local discard: git checkout -- . is BLOCKED when worktreeMode=false', 
 });
 
 test('git local discard: git checkout -- . is ALLOWED in a linked worktree (default mode)', () => {
+  if (!worktreeCwd) { console.log('SKIP: no linked worktree available'); return; }
   const result = analyzeCommand('git checkout -- .', { cwd: worktreeCwd });
   assert.equal(result, null, 'git checkout -- should be allowed in a linked worktree');
 });
@@ -85,6 +107,7 @@ test('git local discard: git restore . is BLOCKED when worktreeMode=false', () =
 });
 
 test('git local discard: git restore . is ALLOWED in a linked worktree (default mode)', () => {
+  if (!worktreeCwd) { console.log('SKIP: no linked worktree available'); return; }
   const result = analyzeCommand('git restore .', { cwd: worktreeCwd });
   assert.equal(result, null, 'git restore should be allowed in a linked worktree');
 });
@@ -95,6 +118,7 @@ test('git local discard: git clean -f is BLOCKED when worktreeMode=false', () =>
 });
 
 test('git local discard: git clean -f is ALLOWED in a linked worktree (default mode)', () => {
+  if (!worktreeCwd) { console.log('SKIP: no linked worktree available'); return; }
   const result = analyzeCommand('git clean -f', { cwd: worktreeCwd });
   assert.equal(result, null, 'git clean -f should be allowed in a linked worktree');
 });
