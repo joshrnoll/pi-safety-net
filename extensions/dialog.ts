@@ -10,6 +10,13 @@
 
 import { analyzeCommand } from './src/core/analyze.js';
 import { buildAnalysisOptions } from './hook.js';
+import {
+  allowKey,
+  commandToAllowKey,
+  saveAllowEntry,
+  defaultGlobalPath,
+} from './src/allowlist.js';
+import type { AllowEntry } from './src/allowlist.js';
 import type { ToolCallEvent, ToolCallEventResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +31,7 @@ export const DIALOG_CHOICES = {
 } as const;
 
 // Session-allow key: "<command>/<subcommand>" e.g. "git/push"
+// Uses the blocked segment from analysis (available after analyzeCommand returns).
 function sessionKey(command: string, segment: string): string {
   // Extract the base command and first non-option arg from the segment
   const parts = segment.trim().split(/\s+/);
@@ -40,16 +48,27 @@ export async function handleToolCallWithDialog(
   event: ToolCallEvent,
   ctx: Pick<ExtensionContext, 'hasUI' | 'cwd' | 'ui'>,
   sessionMap: Map<string, true>,
+  allowlistCache: AllowEntry[] = [],
+  globalAllowlistFile: string = defaultGlobalPath(),
 ): Promise<ToolCallEventResult | undefined> {
   if (event.toolName !== 'bash') return undefined;
 
   const command = (event.input as { command: string }).command;
+
+  // Persistent allowlist bypass: checked BEFORE analysis (fast key lookup, no parser).
+  const preKey = commandToAllowKey(command);
+  const inAllowlist = allowlistCache.some((e) => allowKey(e) === preKey);
+  if (inAllowlist) return undefined;
+
+  // Session-level bypass (also checked before analysis).
+  if (sessionMap.has(preKey)) return undefined;
+
   const options = buildAnalysisOptions(ctx.cwd);
 
   const result = analyzeCommand(command, options);
   if (result === null) return undefined;
 
-  // Session-level bypass: if this pattern was already allowed this session, skip dialog.
+  // Derive segment-based key for session tracking after analysis.
   const key = sessionKey(command, result.segment);
   if (sessionMap.has(key)) return undefined;
 
@@ -87,9 +106,25 @@ export async function handleToolCallWithDialog(
       return undefined;
     }
 
-    case DIALOG_CHOICES.ALLOW_REMEMBER:
-      // Stub: persistent allowlist write is implemented in Wave 3
+    case DIALOG_CHOICES.ALLOW_REMEMBER: {
+      // Parse command + subcommand from blocked segment for the stored entry.
+      // Use the same second-token rule as commandToAllowKey / sessionKey for
+      // consistency: if the second token is a flag, subcommand is omitted.
+      const segParts = result.segment.trim().split(/\s+/);
+      const entryCmd = segParts[0] ?? command.trim().split(/\s+/)[0] ?? command;
+      const rawSub = segParts[1];
+      const entrySub = rawSub === undefined || rawSub.startsWith('-') ? undefined : rawSub;
+      const entry: AllowEntry = { command: entryCmd, subcommand: entrySub };
+
+      // Persist to global allowlist file.
+      saveAllowEntry(entry, 'global', ctx.cwd, globalAllowlistFile);
+
+      // Also populate the in-session cache so subsequent calls in this session
+      // are silently allowed without re-reading the file.
+      allowlistCache.push(entry);
+      sessionMap.set(allowKey(entry), true);
       return undefined;
+    }
 
     case DIALOG_CHOICES.DENY:
     default:
