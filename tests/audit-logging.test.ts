@@ -3,7 +3,7 @@
  *
  * Acceptance criteria:
  *  - After a blocked command (Deny or Allow Once), a JSONL entry appears in
- *    ~/.pi-safety-net/logs/<session-id>.jsonl
+ *    ~/.pi/agent/safety-net/logs/<session-id>.jsonl
  *  - A command containing MY_TOKEN=abc123 has the token value redacted to
  *    <redacted> in both the log and dialog display
  *  - The log directory is created automatically if it does not exist
@@ -73,7 +73,7 @@ function makeCtx(
 }
 
 // ---------------------------------------------------------------------------
-// writeAuditLog: path uses ~/.pi-safety-net/logs/
+// writeAuditLog: path uses ~/.pi/agent/safety-net/logs/
 // ---------------------------------------------------------------------------
 
 test('writeAuditLog writes a JSONL entry to the pi-safety-net logs directory', () => {
@@ -83,7 +83,7 @@ test('writeAuditLog writes a JSONL entry to the pi-safety-net logs directory', (
       homeDir,
     });
 
-    const logFile = join(homeDir, '.pi-safety-net', 'logs', 'test-session-001.jsonl');
+    const logFile = join(homeDir, '.pi', 'agent', 'safety-net', 'logs', 'test-session-001.jsonl');
     assert.ok(existsSync(logFile), `log file should exist at ${logFile}`);
 
     const line = readFileSync(logFile, 'utf-8').trim();
@@ -99,7 +99,7 @@ test('writeAuditLog writes a JSONL entry to the pi-safety-net logs directory', (
 
 test('writeAuditLog creates the log directory automatically if it does not exist', () => {
   const homeDir = makeTmpDir('home-nodir');
-  const logsDir = join(homeDir, '.pi-safety-net', 'logs');
+  const logsDir = join(homeDir, '.pi', 'agent', 'safety-net', 'logs');
   try {
     assert.ok(!existsSync(logsDir), 'logs dir should not exist before first write');
     writeAuditLog('auto-create-test', 'rm -rf /', 'rm -rf /', 'root deletion blocked', null, {
@@ -122,7 +122,7 @@ test('writeAuditLog redacts secrets in the command before writing', () => {
       '/tmp',
       { homeDir },
     );
-    const logFile = join(homeDir, '.pi-safety-net', 'logs', 'redact-test.jsonl');
+    const logFile = join(homeDir, '.pi', 'agent', 'safety-net', 'logs', 'redact-test.jsonl');
     const line = readFileSync(logFile, 'utf-8').trim();
     const entry = JSON.parse(line) as Record<string, unknown>;
     assert.ok(
@@ -144,7 +144,7 @@ test('writeAuditLog appends multiple entries to the same file', () => {
     writeAuditLog('multi-session', 'git push --force', 'git push --force', 'force push', '/cwd', { homeDir });
     writeAuditLog('multi-session', 'rm -rf /', 'rm -rf /', 'root deletion', '/cwd', { homeDir });
 
-    const logFile = join(homeDir, '.pi-safety-net', 'logs', 'multi-session.jsonl');
+    const logFile = join(homeDir, '.pi', 'agent', 'safety-net', 'logs', 'multi-session.jsonl');
     const lines = readFileSync(logFile, 'utf-8').trim().split('\n');
     assert.equal(lines.length, 2, 'should have two JSONL entries');
   } finally {
@@ -233,7 +233,7 @@ test('dialog handler writes audit log entry when command is blocked (Deny)', asy
     );
     assert.ok(result?.block === true, 'Deny should block the command');
 
-    const logDir = join(homeDir, '.pi-safety-net', 'logs');
+    const logDir = join(homeDir, '.pi', 'agent', 'safety-net', 'logs');
     const logFile = join(logDir, 'test-session-deny.jsonl');
     assert.ok(existsSync(logFile), 'audit log should be created');
     const entry = JSON.parse(readFileSync(logFile, 'utf-8').trim()) as Record<string, unknown>;
@@ -266,7 +266,7 @@ test('dialog handler writes audit log entry when command is allowed once', async
     );
     assert.equal(result, undefined, 'Allow Once should not block');
 
-    const logFile = join(homeDir, '.pi-safety-net', 'logs', 'test-session-allow-once.jsonl');
+    const logFile = join(homeDir, '.pi', 'agent', 'safety-net', 'logs', 'test-session-allow-once.jsonl');
     assert.ok(existsSync(logFile), 'audit log should still be written even when user allows');
   } finally {
     if (origHome === undefined) {
@@ -286,7 +286,7 @@ test('dialog handler does NOT write audit log for safe (non-blocked) commands', 
     const ctx = makeCtx({});
     await handleToolCallWithDialog(bashEvent('git status'), ctx, new Map(), [], undefined, undefined, 'safe-session');
 
-    const logDir = join(homeDir, '.pi-safety-net', 'logs');
+    const logDir = join(homeDir, '.pi', 'agent', 'safety-net', 'logs');
     const logFile = join(logDir, 'safe-session.jsonl');
     assert.ok(!existsSync(logFile), 'audit log should NOT be written for safe commands');
   } finally {

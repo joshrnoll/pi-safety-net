@@ -2,7 +2,7 @@
  * Persistent allowlist module for pi-safety-net (ISSUE_00007).
  *
  * Manages two JSON allowlist files:
- *   - Global:  ~/.pi/agent/safety-net-allows.json
+ *   - Global:  ~/.pi/agent/safety-net/allows.json
  *   - Project: <cwd>/.pi/safety-net-allows.json
  *
  * On key collision (same command/subcommand), project entries win.
@@ -76,9 +76,9 @@ export function commandToAllowKey(rawCommand: string): string {
 // Path resolution
 // ---------------------------------------------------------------------------
 
-/** Default global allowlist path: ~/.pi/agent/safety-net-allows.json */
+/** Default global allowlist path: ~/.pi/agent/safety-net/allows.json */
 export function defaultGlobalPath(): string {
-  return path.join(os.homedir(), '.pi', 'agent', 'safety-net-allows.json');
+  return path.join(os.homedir(), '.pi', 'agent', 'safety-net', 'allows.json');
 }
 
 /** Project allowlist path: <cwd>/.pi/safety-net-allows.json */

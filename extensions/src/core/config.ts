@@ -43,8 +43,8 @@ export function resolveProjectConfigPath(cwd: string): string {
 
 export function loadConfig(cwd?: string, options?: LoadConfigOptions): Config {
   const safeCwd = typeof cwd === 'string' ? cwd : process.cwd();
-  // User config lives in ~/.pi-safety-net/ (was ~/.cc-safety-net/ in the original vendored code)
-  const userConfigDir = options?.userConfigDir ?? join(homedir(), '.pi-safety-net');
+  // User config lives in ~/.pi/agent/safety-net/
+  const userConfigDir = options?.userConfigDir ?? join(homedir(), '.pi', 'agent', 'safety-net');
   const userConfigPath = join(userConfigDir, 'config.json');
   const projectConfigPath = resolveProjectConfigPath(safeCwd);
 
@@ -235,7 +235,7 @@ export function validateConfigFile(path: string): ValidationResult {
 }
 
 export function getUserConfigPath(): string {
-  return join(homedir(), '.pi-safety-net', 'config.json');
+  return join(homedir(), '.pi', 'agent', 'safety-net', 'config.json');
 }
 
 export function getProjectConfigPath(cwd?: string): string {

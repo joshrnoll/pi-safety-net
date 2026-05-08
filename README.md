@@ -9,8 +9,9 @@ A global pi extension that intercepts every Bash tool call before execution, sem
 - Detects shell-wrapper recursion (`bash -c '...'`) and interpreter one-liners
 - Allow once, allow for session, or allow and remember (persisted allowlist)
 - Worktree mode on by default — normal git workflow inside worktrees is not disrupted
-- Custom block rules via `.pi-safety-net.json` (project) and `~/.pi-safety-net/config.json` (user)
-- Audit logging to `~/.pi-safety-net/logs/<session-id>.jsonl`
+- Custom block rules via `.pi-safety-net.json` (project) and `~/.pi/agent/safety-net/config.json` (user)
+- Persistent allowlist at `~/.pi/agent/safety-net/allows.json` (global) and `<cwd>/.pi/safety-net-allows.json` (project)
+- Audit logging to `~/.pi/agent/safety-net/logs/<session-id>.jsonl`
 - `/safety-net:explain` and `/safety-net:allow` slash commands
 
 ## Install

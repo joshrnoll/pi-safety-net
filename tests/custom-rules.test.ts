@@ -3,7 +3,7 @@
  *
  * Acceptance criteria:
  *  - A .pi-safety-net.json with a "block git add -A" rule causes git add -A to trigger a block
- *  - A ~/.pi-safety-net/config.json user rule is active across projects
+ *  - A ~/.pi/agent/safety-net/config.json user rule is active across projects
  *  - A project rule with the same name as a user rule overrides it
  *  - A .safety-net.json file (legacy name) is still loaded if .pi-safety-net.json does not exist
  */
@@ -107,7 +107,7 @@ test('loadConfig .pi-safety-net.json takes precedence over .safety-net.json', ()
   }
 });
 
-test('loadConfig reads user config from ~/.pi-safety-net/config.json', () => {
+test('loadConfig reads user config from ~/.pi/agent/safety-net/config.json', () => {
   const userDir = makeTmpDir('user-config-dir');
   const projectDir = makeTmpDir('project-for-user');
   try {
@@ -185,7 +185,7 @@ test('git add specific-file.ts is allowed even with custom git-add rule', () => 
   }
 });
 
-test('user rule from ~/.pi-safety-net/config.json causes block via analyzeCommand', () => {
+test('user rule from ~/.pi/agent/safety-net/config.json causes block via analyzeCommand', () => {
   const userDir = makeTmpDir('user-analyze');
   const projectDir = makeTmpDir('project-analyze');
   try {
